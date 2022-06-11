@@ -5,6 +5,8 @@ const c = @cImport({
     @cInclude("miniz.h");
 });
 
+const max_zip_size = 2 << 30;
+
 /// zip file manipulation
 pub const Archive = struct {
     pub const Error = error{
@@ -92,14 +94,21 @@ pub const Archive = struct {
     }
 
     /// Create an archive from given zip file, ready to read
-    pub fn fromFile(allocator: std.mem.Allocator, file_path: []const u8) !*Archive {
-        var buf = try std.fs.cwd().readFileAlloc(
-            allocator,
+    pub fn fromFile(allocator: std.mem.Allocator, file_path: [:0]const u8) !*Archive {
+        var ar = try allocator.create(Archive);
+        errdefer allocator.destroy(ar);
+        ar.* = .{
+            .allocator = allocator,
+            .archive = undefined,
+        };
+        ar.initArchive();
+        const result = c.mz_zip_reader_init_file(
+            &ar.archive,
             file_path,
-            std.math.maxInt(usize),
+            0,
         );
-        defer allocator.free(buf);
-        return try fromMemory(allocator, buf);
+        if (result != 1) return ar.getLastError();
+        return ar;
     }
 
     /// Close archive, flush data to disk if necessary
@@ -279,9 +288,16 @@ test "main" {
     ar.deinit();
 
     ar = try Archive.fromFile(std.testing.allocator, zipfile);
+    try testing.expectEqual(@intCast(u32, 2), ar.getNumberOfFiles());
     var buf = try ar.readFileAlloc(std.testing.allocator, "manifest.txt", true, false);
     try testing.expectEqualStrings(
         "abc",
+        buf,
+    );
+    std.testing.allocator.free(buf);
+    buf = try ar.readFileAlloc(std.testing.allocator, "all/a/a.txt", true, false);
+    try testing.expectEqualStrings(
+        "a",
         buf,
     );
     std.testing.allocator.free(buf);
