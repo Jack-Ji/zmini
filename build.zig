@@ -16,6 +16,10 @@ pub fn link(exe: *std.build.LibExeObjStep) void {
     defer flags.deinit();
     flags.append("-Wno-return-type-c-linkage") catch unreachable;
     flags.append("-fno-sanitize=undefined") catch unreachable;
+    flags.append("-DMINIZ_USE_UNALIGNED_LOADS_AND_STORES=1") catch unreachable;
+    if (exe.target.getCpuArch().endian() == .Little) {
+        flags.append("-DMINIZ_LITTLE_ENDIAN=1") catch unreachable;
+    }
 
     var lib = exe.builder.addStaticLibrary("zmini", comptime thisDir() ++ "/src/main.zig");
     lib.setBuildMode(exe.build_mode);
@@ -27,6 +31,7 @@ pub fn link(exe: *std.build.LibExeObjStep) void {
         flags.items,
     );
     exe.linkLibrary(lib);
+    exe.addIncludeDir(thisDir() ++ "/src/c/");
 }
 
 pub fn getPkg() std.build.Pkg {

@@ -57,3 +57,5 @@ dkms.conf
 # ziglang temp files
 zig-cache
 zig-out
+
+*.zip
