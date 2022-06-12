@@ -5,10 +5,13 @@ const c = @cImport({
     @cInclude("miniz.h");
 });
 
-const max_zip_size = 2 << 30;
-
 /// zip file manipulation
 pub const Archive = struct {
+    pub const Mode = enum {
+        read,
+        write,
+    };
+
     pub const Error = error{
         UndefinedError,
         TooManyFiles,
@@ -53,60 +56,24 @@ pub const Archive = struct {
     };
 
     allocator: std.mem.Allocator,
+    mode: Mode,
     archive: c.mz_zip_archive,
     need_write: bool = false,
 
-    /// Create an archive, ready to write
-    pub fn new(allocator: std.mem.Allocator, file_path: [:0]const u8) !*Archive {
+    /// Create an archive
+    pub fn init(allocator: std.mem.Allocator, file_path: [:0]const u8, mode: Mode) !*Archive {
         var ar = try allocator.create(Archive);
         errdefer allocator.destroy(ar);
         ar.* = .{
             .allocator = allocator,
+            .mode = mode,
             .archive = undefined,
         };
         ar.initArchive();
-        const result = c.mz_zip_writer_init_file(
-            &ar.archive,
-            file_path,
-            0,
-        );
-        if (result != 1) return ar.getLastError();
-        return ar;
-    }
-
-    /// Create an archive from zip data in memory, ready to read
-    pub fn fromMemory(allocator: std.mem.Allocator, data: []const u8) !*Archive {
-        var ar = try allocator.create(Archive);
-        errdefer allocator.destroy(ar);
-        ar.* = .{
-            .allocator = allocator,
-            .archive = undefined,
+        const result = switch (mode) {
+            .read => c.mz_zip_reader_init_file(&ar.archive, file_path, 0),
+            .write => c.mz_zip_writer_init_file(&ar.archive, file_path, 0),
         };
-        ar.initArchive();
-        const result = c.mz_zip_reader_init_mem(
-            &ar.archive,
-            data.ptr,
-            data.len,
-            0,
-        );
-        if (result != 1) return ar.getLastError();
-        return ar;
-    }
-
-    /// Create an archive from given zip file, ready to read
-    pub fn fromFile(allocator: std.mem.Allocator, file_path: [:0]const u8) !*Archive {
-        var ar = try allocator.create(Archive);
-        errdefer allocator.destroy(ar);
-        ar.* = .{
-            .allocator = allocator,
-            .archive = undefined,
-        };
-        ar.initArchive();
-        const result = c.mz_zip_reader_init_file(
-            &ar.archive,
-            file_path,
-            0,
-        );
         if (result != 1) return ar.getLastError();
         return ar;
     }
@@ -114,6 +81,7 @@ pub const Archive = struct {
     /// Close archive, flush data to disk if necessary
     pub fn deinit(ar: *Archive) void {
         if (ar.need_write) {
+            assert(ar.mode == .write);
             const result = c.mz_zip_writer_finalize_archive(&ar.archive);
             assert(result == 1);
         }
@@ -124,6 +92,7 @@ pub const Archive = struct {
 
     /// Get number of files in archive
     pub fn getNumberOfFiles(ar: *Archive) u32 {
+        assert(ar.mode == .read);
         return @intCast(u32, c.mz_zip_reader_get_num_files(&ar.archive));
     }
 
@@ -137,6 +106,7 @@ pub const Archive = struct {
         data: []const u8,
         compress_level: ?u8,
     ) !void {
+        assert(ar.mode == .write);
         if (std.mem.endsWith(u8, archive_name, "/")) assert(data.len == 0);
         const result = c.mz_zip_writer_add_mem(
             &ar.archive,
@@ -152,14 +122,22 @@ pub const Archive = struct {
     /// Add contexts of file on disk
     pub fn addFileFromPath(
         ar: *Archive,
-        file_path: []const u8,
         archive_name: [:0]const u8,
+        file_path: [:0]const u8,
         compress_level: ?u8,
     ) !void {
+        assert(ar.mode == .write);
         assert(!std.mem.endsWith(u8, archive_name, "/"));
-        var buf = try std.fs.cwd().readFileAlloc(ar.allocator, file_path, std.math.maxInt(usize));
-        defer ar.allocator.free(buf);
-        return ar.addFileFromMemory(archive_name, buf, compress_level);
+        const result = c.mz_zip_writer_add_file(
+            &ar.archive,
+            archive_name,
+            file_path,
+            null,
+            0,
+            @intCast(c.mz_uint, compress_level orelse 6),
+        );
+        if (result != 1) return ar.getLastError();
+        ar.need_write = true;
     }
 
     /// Read file's content to self-allocated buffer
@@ -170,6 +148,7 @@ pub const Archive = struct {
         case_sensitivy: bool,
         ignore_path: bool,
     ) ![]u8 {
+        assert(ar.mode == .read);
         var file_index = try ar.getFileIndex(archive_name, case_sensitivy, ignore_path);
         var file_stat = try ar.getFileStat(file_index);
         var buf = try allocator.alloc(u8, file_stat.size);
@@ -187,6 +166,7 @@ pub const Archive = struct {
 
     /// Read file's content into given buffer
     pub fn readFile(ar: *Archive, file_index: u32, buf: []u8) !void {
+        assert(ar.mode == .read);
         const result = c.mz_zip_reader_extract_to_mem(
             &ar.archive,
             @intCast(c.mz_uint, file_index),
@@ -204,6 +184,7 @@ pub const Archive = struct {
         case_sensitivy: bool,
         ignore_path: bool,
     ) !u32 {
+        assert(ar.mode == .read);
         var flags: c.mz_uint = 0;
         if (case_sensitivy) flags |= c.MZ_ZIP_FLAG_CASE_SENSITIVE;
         if (ignore_path) flags |= c.MZ_ZIP_FLAG_IGNORE_PATH;
@@ -214,6 +195,7 @@ pub const Archive = struct {
 
     /// Get file's basic information
     pub fn getFileStat(ar: *Archive, file_index: u32) !FileStat {
+        assert(ar.mode == .read);
         var mz_stat: c.mz_zip_archive_file_stat = undefined;
         const result = c.mz_zip_reader_file_stat(
             &ar.archive,
@@ -282,12 +264,12 @@ pub const Archive = struct {
 test "main" {
     const zipfile = "test.zip";
 
-    var ar = try Archive.new(std.testing.allocator, zipfile);
-    try ar.addFileFromPath("testdata/manifest.txt", "manifest.txt", null);
-    try ar.addFileFromPath("testdata/all/a/a.txt", "all/a/a.txt", null);
+    var ar = try Archive.init(std.testing.allocator, zipfile, .write);
+    try ar.addFileFromPath("manifest.txt", "testdata/manifest.txt", null);
+    try ar.addFileFromPath("all/a/a.txt", "testdata/all/a/a.txt", null);
     ar.deinit();
 
-    ar = try Archive.fromFile(std.testing.allocator, zipfile);
+    ar = try Archive.init(std.testing.allocator, zipfile, .read);
     try testing.expectEqual(@intCast(u32, 2), ar.getNumberOfFiles());
     var buf = try ar.readFileAlloc(std.testing.allocator, "manifest.txt", true, false);
     try testing.expectEqualStrings(
