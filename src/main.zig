@@ -140,6 +140,40 @@ pub const Archive = struct {
         ar.need_write = true;
     }
 
+    /// Add contexts of dir recursively on disk
+    pub fn addDir(ar: *Archive, allocator: std.mem.Allocator, dir_path: [:0]const u8, compress_level: ?u8) !void {
+        assert(ar.mode == .write);
+        var dir = try std.fs.cwd().openDir(dir_path, .{
+            .access_sub_paths = true,
+            .iterate = true,
+            .no_follow = true,
+        });
+        defer dir.close();
+        var walk = try dir.walk(allocator);
+        defer walk.deinit();
+        var buf1: [512]u8 = undefined;
+        var buf2: [512]u8 = undefined;
+        while (try walk.next()) |we| {
+            if (we.kind != .File) continue;
+            const archive_name = try std.fmt.bufPrintZ(
+                &buf1,
+                "{s}",
+                .{we.path},
+            );
+            std.mem.replaceScalar(u8, archive_name, '\\', '/');
+            const path = try std.fmt.bufPrintZ(
+                &buf2,
+                "{s}/{s}",
+                .{ dir_path, we.path },
+            );
+            try ar.addFileFromPath(
+                archive_name,
+                path,
+                compress_level,
+            );
+        }
+    }
+
     /// Read file's content to self-allocated buffer
     pub fn readFileAlloc(
         ar: *Archive,
@@ -265,23 +299,22 @@ test "main" {
     const zipfile = "test.zip";
 
     var ar = try Archive.init(std.testing.allocator, zipfile, .write);
-    try ar.addFileFromPath("manifest.txt", "testdata/manifest.txt", null);
-    try ar.addFileFromPath("all/a/a.txt", "testdata/all/a/a.txt", null);
+    try ar.addDir(std.testing.allocator, "testdata", null);
     ar.deinit();
 
     ar = try Archive.init(std.testing.allocator, zipfile, .read);
-    try testing.expectEqual(@intCast(u32, 2), ar.getNumberOfFiles());
+    try testing.expectEqual(@intCast(u32, 4), ar.getNumberOfFiles());
     var buf = try ar.readFileAlloc(std.testing.allocator, "manifest.txt", true, false);
-    try testing.expectEqualStrings(
-        "abc",
-        buf,
-    );
+    try testing.expectEqualStrings("abc", buf);
     std.testing.allocator.free(buf);
     buf = try ar.readFileAlloc(std.testing.allocator, "all/a/a.txt", true, false);
-    try testing.expectEqualStrings(
-        "a",
-        buf,
-    );
+    try testing.expectEqualStrings("a", buf);
+    std.testing.allocator.free(buf);
+    buf = try ar.readFileAlloc(std.testing.allocator, "all/b/b.txt", true, false);
+    try testing.expectEqualStrings("b", buf);
+    std.testing.allocator.free(buf);
+    buf = try ar.readFileAlloc(std.testing.allocator, "all/c/c.txt", true, false);
+    try testing.expectEqualStrings("c", buf);
     std.testing.allocator.free(buf);
     ar.deinit();
 }
