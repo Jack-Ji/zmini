@@ -51,8 +51,8 @@ pub const Archive = struct {
         is_dir: bool,
         is_encrypted: bool,
         is_supported: bool,
-        filename: []u8 = undefined,
-        filename_raw: [512]u8 = undefined,
+        filename: [512]u8 = undefined,
+        filename_size: usize = undefined,
     };
 
     allocator: std.mem.Allocator,
@@ -141,11 +141,10 @@ pub const Archive = struct {
     }
 
     /// Add contexts of dir recursively on disk
-    pub fn addDir(ar: *Archive, allocator: std.mem.Allocator, dir_path: [:0]const u8, compress_level: ?u8) !void {
+    pub fn addDir(ar: *Archive, allocator: std.mem.Allocator, dir_path: []const u8, compress_level: ?u8) !void {
         assert(ar.mode == .write);
-        var dir = try std.fs.cwd().openDir(dir_path, .{
+        var dir = try std.fs.cwd().openIterableDir(dir_path, .{
             .access_sub_paths = true,
-            .iterate = true,
             .no_follow = true,
         });
         defer dir.close();
@@ -243,12 +242,12 @@ pub const Archive = struct {
             .is_encrypted = if (mz_stat.m_is_encrypted == 1) true else false,
             .is_supported = if (mz_stat.m_is_supported == 1) true else false,
         };
-        std.mem.copy(u8, info.filename_raw[0..512], mz_stat.m_filename[0..512]);
-        info.filename = info.filename_raw[0..std.mem.indexOfSentinel(
+        std.mem.copy(u8, info.filename[0..512], mz_stat.m_filename[0..512]);
+        info.filename_size = std.mem.indexOfSentinel(
             u8,
             0,
-            @ptrCast([*:0]u8, &info.filename_raw),
-        )];
+            @ptrCast([*:0]u8, &info.filename),
+        );
         return info;
     }
 
