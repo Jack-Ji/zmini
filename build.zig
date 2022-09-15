@@ -21,13 +21,13 @@ pub fn link(exe: *std.build.LibExeObjStep) void {
         flags.append("-DMINIZ_LITTLE_ENDIAN=1") catch unreachable;
     }
 
-    var lib = exe.builder.addStaticLibrary("zmini", comptime thisDir() ++ "/src/main.zig");
+    var lib = exe.builder.addStaticLibrary("zmini", thisDir() ++ "/src/main.zig");
     lib.setBuildMode(exe.build_mode);
     lib.setTarget(exe.target);
     lib.linkLibC();
     lib.addIncludeDir(thisDir() ++ "/src/c/");
     lib.addCSourceFile(
-        comptime thisDir() ++ "/src/c/miniz.c",
+        thisDir() ++ "/src/c/miniz.c",
         flags.items,
     );
     exe.linkLibrary(lib);
@@ -38,11 +38,11 @@ pub fn getPkg() std.build.Pkg {
     return .{
         .name = "zmini",
         .source = .{
-            .path = comptime thisDir() ++ "/src/main.zig",
+            .path = thisDir() ++ "/src/main.zig",
         },
     };
 }
 
-fn thisDir() []const u8 {
-    return std.fs.path.dirname(@src().file) orelse ".";
+inline fn thisDir() []const u8 {
+    return comptime std.fs.path.dirname(@src().file) orelse ".";
 }

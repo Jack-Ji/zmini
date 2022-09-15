@@ -71,8 +71,8 @@ pub const Archive = struct {
         };
         ar.initArchive();
         const result = switch (mode) {
-            .read => c.mz_zip_reader_init_file(&ar.archive, file_path, 0),
-            .write => c.mz_zip_writer_init_file(&ar.archive, file_path, 0),
+            .read => c.mz_zip_reader_init_file(&ar.archive, file_path.ptr, 0),
+            .write => c.mz_zip_writer_init_file(&ar.archive, file_path.ptr, 0),
         };
         if (result != 1) return ar.getLastError();
         return ar;
@@ -110,7 +110,7 @@ pub const Archive = struct {
         if (std.mem.endsWith(u8, archive_name, "/")) assert(data.len == 0);
         const result = c.mz_zip_writer_add_mem(
             &ar.archive,
-            archive_name,
+            archive_name.ptr,
             data.ptr,
             data.len,
             @intCast(c.mz_uint, compress_level orelse 6),
@@ -130,8 +130,8 @@ pub const Archive = struct {
         assert(!std.mem.endsWith(u8, archive_name, "/"));
         const result = c.mz_zip_writer_add_file(
             &ar.archive,
-            archive_name,
-            file_path,
+            archive_name.ptr,
+            file_path.ptr,
             null,
             0,
             @intCast(c.mz_uint, compress_level orelse 6),
@@ -221,7 +221,7 @@ pub const Archive = struct {
         var flags: c.mz_uint = 0;
         if (case_sensitivy) flags |= c.MZ_ZIP_FLAG_CASE_SENSITIVE;
         if (ignore_path) flags |= c.MZ_ZIP_FLAG_IGNORE_PATH;
-        const index = c.mz_zip_reader_locate_file(&ar.archive, archive_name, null, flags);
+        const index = c.mz_zip_reader_locate_file(&ar.archive, archive_name.ptr, null, flags);
         if (index < 0) return ar.getLastError();
         return @intCast(u32, index);
     }
