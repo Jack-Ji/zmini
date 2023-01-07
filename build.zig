@@ -25,13 +25,13 @@ pub fn link(exe: *std.build.LibExeObjStep) void {
     lib.setBuildMode(exe.build_mode);
     lib.setTarget(exe.target);
     lib.linkLibC();
-    lib.addIncludeDir(thisDir() ++ "/src/c/");
+    lib.addIncludePath(thisDir() ++ "/src/c/");
     lib.addCSourceFile(
         thisDir() ++ "/src/c/miniz.c",
         flags.items,
     );
     exe.linkLibrary(lib);
-    exe.addIncludeDir(thisDir() ++ "/src/c/");
+    exe.addIncludePath(thisDir() ++ "/src/c/");
 }
 
 pub fn getPkg() std.build.Pkg {
